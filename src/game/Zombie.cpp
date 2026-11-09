@@ -389,8 +389,13 @@ ZombieOutput Zombie::update(float dt, const ZombieContext& c)
     float k = 1.0f - std::exp(-8.0f * dt);
     m_moveBlend += (moving - m_moveBlend) * k;
     m_runBlend  += (runT - m_runBlend) * k;
-    m_phase += dt * (4.5f + spd * 2.2f);
-    if (m_phase > 2000.0f) m_phase -= 2000.0f;
+    m_phase += dt * (1.0f + spd * 1.5f);                  // a slow, dragging shuffle (a run is quicker)
+    long half = (long)std::floor(m_phase / kPi);
+    if (half != m_lastHalfCycle) {
+        m_lastHalfCycle = half;
+        if (m_body.grounded && m_moveBlend > 0.4f) { out.stepped = true; out.running = spd > 2.8f; }
+    }
+    if (m_phase > kPi * 200.0f) { m_phase -= kPi * 200.0f; m_lastHalfCycle -= 200; }
     return out;
 }
 

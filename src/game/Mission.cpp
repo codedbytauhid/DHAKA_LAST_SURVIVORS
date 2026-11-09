@@ -22,6 +22,7 @@ void MissionManager::resetMissionData()
     m_hasCard = m_gateUnlocked = m_checkpointActive = false;
     for (int i = 0; i < kAmmoSites; ++i) m_ammoTaken[i] = false;
     m_pendingAmmo = 0;
+    m_events.clear();
     m_gateProgress = 0.0f;
     m_introT = m_playT = m_failTimer = 0.0f;
     m_killed = 0;
@@ -206,24 +207,29 @@ void MissionManager::interact(const MissionFrame& f)
     switch (findInteractable(f, prompt, &index)) {
     case Target::Card:
         m_hasCard = true;                                   // the prompt disappears with the card: it cannot be taken twice
+        m_events.push_back(MissionEvent::CardCollected);
         pushMessage("ACCESS CARD ACQUIRED.", 2.6f);
         break;
     case Target::Ammo:
         m_ammoTaken[index] = true;                          // one-time pickup; it also vanishes from the level
         m_pendingAmmo += kAmmoPerPickup;
+        m_events.push_back(MissionEvent::AmmoCollected);
         pushMessage("AMMUNITION +12.", 2.0f);
         break;
     case Target::Panel:
         if (m_hasCard) {
             m_gateUnlocked = true;
             m_checkpointActive = true;
+            m_events.push_back(MissionEvent::GateUnlocked);
             pushMessage("GATE ACCESS GRANTED.", 2.4f);
             pushMessage("THE EXIT IS OPEN. RUN!", 3.0f);
         } else {
+            m_events.push_back(MissionEvent::PanelDenied);
             pushMessage("ACCESS DENIED. YOU NEED AN ACCESS CARD.", 2.8f);
         }
         break;
     case Target::Gate:
+        m_events.push_back(MissionEvent::GateLocked);
         pushMessage("THE GATE IS LOCKED. THE CONTROL PANEL IS IN THE SECURITY BOOTH.", 3.4f);
         break;
     case Target::None:
@@ -275,6 +281,7 @@ void MissionManager::update(const MissionFrame& f)
             m_finalHealth = 0;
             m_killed = f.zombiesTotal - f.zombiesAlive;
             m_state = GameState::MissionFailed;
+            m_events.push_back(MissionEvent::Failed);
         }
         return;
     }
@@ -282,6 +289,7 @@ void MissionManager::update(const MissionFrame& f)
     // objectives: only the CURRENT stage can be completed, so they always happen in order
     while (m_stage < StageCount && stageComplete(m_stage, f)) {
         m_done[m_stage] = true;
+        if (m_stage != StageCheckpoint) m_events.push_back(MissionEvent::ObjectiveComplete);
         switch (m_stage) {
         case StageEscapeClassroom: pushMessage("STAY QUIET. FIND THE ACCESS CARD.", 3.0f); break;
         case StageFindCard:        break;                                 // "ACCESS CARD ACQUIRED." was already shown
@@ -294,6 +302,7 @@ void MissionManager::update(const MissionFrame& f)
             m_killed = f.zombiesTotal - f.zombiesAlive;
             m_prompt.clear();
             m_state = GameState::MissionCompleted;
+            m_events.push_back(MissionEvent::Completed);
             return;
         }
         ++m_stage;

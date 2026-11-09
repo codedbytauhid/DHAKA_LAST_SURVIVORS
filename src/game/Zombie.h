@@ -18,6 +18,9 @@
 
 enum class ZombieState { Idle, Wander, Chase, Attack, Dead };
 
+// Things that happen to / around a zombie: the audio system turns them into sounds (see GameAudio).
+enum class ZombieEvent { Groan, Detect, Attack, Death, Hit, Step, RunStep };
+
 // All the tuning numbers in one place.
 struct ZombieConfig {
     float detectRange   = 13.0f;   // how far a zombie can SEE the player (inside its field of view)
@@ -54,6 +57,8 @@ struct ZombieOutput {              // what happened this frame (the manager turn
     bool detected = false;         // started chasing
     bool attacked = false;         // started a swing
     bool groaned = false;
+    bool stepped = false;          // a foot hit the ground (footstep sound)
+    bool running = false;          // ... while moving fast
 };
 
 class Zombie {
@@ -146,6 +151,7 @@ private:
     // animation
     float m_phase = 0.0f, m_time = 0.0f, m_moveBlend = 0.0f, m_runBlend = 0.0f, m_deathT = 0.0f;
     float m_limp = 1.0f, m_speedMul = 1.0f;
+    long m_lastHalfCycle = 0;
 
     // combat
     float m_health = 100.0f, m_maxHealth = 100.0f, m_hitTimer = 0.0f;

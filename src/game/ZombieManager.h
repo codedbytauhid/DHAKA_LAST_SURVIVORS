@@ -14,8 +14,6 @@
 #include "game/NavGraph.h"
 #include "game/Zombie.h"
 
-// Audio hooks: Milestone 6 will connect real sounds to these.
-enum class ZombieEvent { Groan, Detect, Attack, Death };
 
 class ZombieManager {
 public:
@@ -39,6 +37,7 @@ public:
     // The zombies themselves (the pistol's shot test needs to look at them and hurt them).
     std::vector<Zombie>& zombies() { return m_zombies; }
     void announceDeath(const glm::vec3& at) const { emit(ZombieEvent::Death, at); }
+    void announceHit(const glm::vec3& at) const { emit(ZombieEvent::Hit, at); }
 
     // DEBUG MODE ONLY (key K, only reachable after F1): kills the closest living zombie within maxDist.
     bool killNearest(const glm::vec3& from, float maxDist);

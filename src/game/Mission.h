@@ -14,10 +14,14 @@
 #pragma once
 #include <deque>
 #include <string>
+#include <vector>
 #include <glm/glm.hpp>
 #include "world/Collision.h"
 
 enum class GameState { MainMenu, Intro, Playing, Paused, MissionFailed, MissionCompleted };
+
+// Things the audio system and the UI want to react to. main.cpp reads them with pollEvent().
+enum class MissionEvent { CardCollected, AmmoCollected, PanelDenied, GateUnlocked, GateLocked, ObjectiveComplete, Completed, Failed };
 
 enum MissionStage {
     StageEscapeClassroom = 0, StageFindCard, StageReachCourtyard, StageUnlockGate, StageEscapeGate, StageCheckpoint,
@@ -79,6 +83,9 @@ public:
     float gateProgress() const { return m_gateProgress; }     // 0 closed .. 1 open
     bool checkpointActive() const { return m_checkpointActive; }
 
+    // ---- events (a queue: call until it returns false)
+    bool pollEvent(MissionEvent& e) { if (m_events.empty()) return false; e = m_events.front(); m_events.erase(m_events.begin()); return true; }
+
     // ---- messages (short lines that fade in and out)
     bool hasMessage() const { return m_hasMessage; }
     const std::string& messageText() const { return m_message; }
@@ -113,6 +120,7 @@ private:
     int m_killed = 0, m_finalHealth = 0;
     std::string m_prompt;
 
+    std::vector<MissionEvent> m_events;
     std::deque<Msg> m_queue;
     std::string m_message;
     bool m_hasMessage = false;

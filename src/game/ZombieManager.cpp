@@ -152,6 +152,7 @@ float ZombieManager::update(float dt, const vec3& playerPos, float playerSpeed, 
         if (out.detected) emit(ZombieEvent::Detect, z.position());
         if (out.attacked) emit(ZombieEvent::Attack, z.position());
         if (out.groaned)  emit(ZombieEvent::Groan, z.position());
+        if (out.stepped)  emit(out.running ? ZombieEvent::RunStep : ZombieEvent::Step, z.position());
     }
     return damage;
 }
@@ -204,7 +205,9 @@ void ZombieManager::draw(const Shader& shader, const Level& level, const vec3& c
         float lean = 0.38f + 0.12f * rb;
         float bob = std::fabs(sw) * 0.04f * mb;
         float roll = std::sin(z.phase() * 0.5f) * 0.06f * mb + std::sin(t * 0.9f) * 0.02f;   // lurching side to side
-        float headDroop = 0.28f + 0.1f * std::sin(t * 0.7f);
+        float headDroop = 0.28f + 0.1f * std::sin(t * 0.7f) + 0.06f * std::sin(t * 0.37f + (float)id);
+        float twitch = (std::fmod(t * 0.55f + (float)id * 1.3f, 7.0f) < 0.18f) ? 0.22f * std::sin(t * 70.0f) : 0.0f;   // an occasional jerk of the head
+        float torsoTwist = std::sin(z.phase()) * 0.16f * mb;                                                          // shoulders twist with each step
 
         float sp = z.swingProgress();                                       // attack animation: raise, then strike down
         if (sp >= 0.0f) {
@@ -228,9 +231,13 @@ void ZombieManager::draw(const Shader& shader, const Level& level, const vec3& c
         float dead = z.deathProgress();
         float fall = 0.0f, lift = 0.0f;
         if (z.state() == ZombieState::Dead) {
-            fall = dead * dead * (kPi * 0.5f);                              // topples forward, faster and faster
-            lift = 0.14f * dead * dead;                                     // chest rests on the floor
-            lean *= (1.0f - dead); roll *= (1.0f - dead); bob = 0.0f; legL = legR = 0.0f;
+            // 1) the knees give way (0 - 40%)   2) it topples over, faster and faster (35 - 100%)
+            float kneel = std::min(1.0f, dead / 0.4f);
+            float fallT = std::max(0.0f, (dead - 0.35f) / 0.65f);
+            fall = fallT * fallT * (kPi * 0.5f);
+            lift = 0.14f * fallT * fallT - 0.28f * kneel * (1.0f - fallT);  // sinks while kneeling, then the chest rests on the floor
+            lean *= (1.0f - dead); roll *= (1.0f - dead); bob = 0.0f;
+            legL = legR = -0.9f * kneel * (1.0f - fallT);                    // knees bend forward
             armL = lerpf(armL, -0.3f, dead); armR = lerpf(armR, -0.6f, dead);
             headDroop = lerpf(headDroop, 0.0f, dead);
         }
@@ -238,11 +245,16 @@ void ZombieManager::draw(const Shader& shader, const Level& level, const vec3& c
         // ---- frames
         glm::mat4 base = glm::translate(glm::mat4(1.0f), pos + vec3(0.0f, bob + lift, 0.0f));
         base = glm::rotate(base, z.facing(), vec3(0, 1, 0));
-        base = glm::rotate(base, fall, vec3(1, 0, 0));
+        float lunge = (sp >= 0.0f) ? 0.22f * std::sin(sp * kPi) : 0.0f;       // attacking: lunge toward the target
+        base = glm::translate(base, vec3(0.0f, 0.0f, lunge - 0.10f * hit));    // being shot: knocked back
+        float fallDir = (id % 2 == 0) ? 1.0f : -1.0f;                          // some fall forward, some backward
+        base = glm::rotate(base, fall * fallDir, vec3(1, 0, 0));
+        base = glm::rotate(base, fall * 0.3f * (float)((id % 3) - 1), vec3(0, 0, 1));   // and a little to the side
         base = glm::scale(base, vec3(scale));
 
         glm::mat4 upper = glm::translate(base, vec3(0.0f, 0.85f, 0.0f));
         upper = glm::rotate(upper, roll, vec3(0, 0, 1));
+        upper = glm::rotate(upper, torsoTwist, vec3(0, 1, 0));
         upper = glm::rotate(upper, lean, vec3(1, 0, 0));
 
         auto part = [&](const glm::mat4& f, vec3 c, vec3 s, vec3 col) {
@@ -260,7 +272,7 @@ void ZombieManager::draw(const Shader& shader, const Level& level, const vec3& c
 
         // head: droops forward and turns to look around
         glm::mat4 head = glm::translate(upper, vec3(0.0f, 0.63f, 0.0f));
-        head = glm::rotate(head, z.headYaw(), vec3(0, 1, 0));
+        head = glm::rotate(head, z.headYaw() - torsoTwist * 0.7f + twitch, vec3(0, 1, 0));
         head = glm::rotate(head, headDroop, vec3(1, 0, 0));
         part(upper, vec3(0.0f, 0.62f, 0.0f), vec3(0.08f, 0.07f, 0.08f), skin * 0.9f);            // neck
         part(head,  vec3(0.0f, 0.12f, 0.0f), vec3(0.22f, 0.23f, 0.22f), skin);                    // head
