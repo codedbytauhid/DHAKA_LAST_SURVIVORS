@@ -97,10 +97,14 @@ void Player::update(float dt, const PlayerInput& inRaw, const glm::vec3& camF, c
     if (in.jump && m_body.grounded) {
         m_body.vel.y = jumpSpeed;
         m_body.grounded = false;
+        m_events.jumped = true;
     }
 
     // 5. gravity + collision + stairs
+    bool wasGrounded = m_body.grounded;
+    float fallSpeed = m_body.vel.y;
     world.move(m_body, dt);
+    if (!wasGrounded && m_body.grounded && fallSpeed < -2.5f) m_events.landed = true;      // a real touch-down (not a tiny settle after a teleport)
 
     // fell out of the world? go back to the last teleport spot
     if (m_body.pos.y < -30.0f) teleport(m_spawn, m_spawnFacing);
@@ -112,9 +116,16 @@ void Player::update(float dt, const PlayerInput& inRaw, const glm::vec3& camF, c
     float k = 1.0f - std::exp(-10.0f * dt);
     m_moveBlend += (moving - m_moveBlend) * k;
     m_runBlend  += (runT - m_runBlend) * k;
-    m_phase += dt * (6.0f + spd * 2.2f);     // faster steps when moving faster
+    m_phase += dt * (1.2f + spd * 1.55f);    // faster steps when moving faster (walk about 2 steps/s, sprint about 3.3)
+
+    // a foot hits the ground every half cycle: that is the moment for a footstep sound
+    long half = (long)std::floor(m_phase / kPi);
+    if (half != m_lastHalfCycle) {
+        m_lastHalfCycle = half;
+        if (m_body.grounded && m_moveBlend > 0.4f && !m_dead) { m_events.step = true; m_events.run = spd > (walkSpeed + sprintSpeed) * 0.5f; }
+    }
     m_time += dt;
-    if (m_phase > 2.0f * kPi * 100.0f) m_phase -= 2.0f * kPi * 100.0f;
+    if (m_phase > kPi * 200.0f) { m_phase -= kPi * 200.0f; m_lastHalfCycle -= 200; }   // keep the number small (it is a long-lived float)
 }
 
 void Player::drawPart(const Shader& shader, const glm::mat4& frame, const glm::vec3& center,
@@ -172,7 +183,9 @@ void Player::draw(const Shader& shader, float sunScale, float ambientScale, cons
     base = glm::rotate(base, fall, glm::vec3(1, 0, 0));
 
     glm::mat4 upper = glm::translate(base, glm::vec3(0.0f, 0.85f, breathe));   // origin at the hips
-    upper = glm::rotate(upper, lean, glm::vec3(1, 0, 0));
+    upper = glm::rotate(upper, lean - pose.recoil * 0.07f, glm::vec3(1, 0, 0));                    // the whole body rocks back a little when firing
+    upper = glm::rotate(upper, std::sin(m_phase) * 0.11f * m_moveBlend * (1.0f - pose.raise), glm::vec3(0, 1, 0));   // shoulders twist against the hips
+    upper = glm::rotate(upper, std::sin(m_phase + 1.57f) * 0.035f * m_moveBlend, glm::vec3(0, 0, 1));              // and sway
 
     // torso, backpack, neck, head, hair, eyes
     drawPart(shader, upper, glm::vec3(0.0f, 0.30f, 0.0f),   glm::vec3(0.42f, 0.60f, 0.22f), shirt);
@@ -223,6 +236,15 @@ void Player::draw(const Shader& shader, float sunScale, float ambientScale, cons
         drawPart(shader, f, glm::vec3(0.0f, -0.58f, 0.008f),  glm::vec3(0.040f, 0.20f, 0.030f), metal * 1.5f);            // frame
         drawPart(shader, f, glm::vec3(0.0f, -0.525f, -0.040f), glm::vec3(0.040f, 0.050f, 0.100f), gripCol);               // grip
         drawPart(shader, f, glm::vec3(0.0f, -0.565f, -0.006f), glm::vec3(0.012f, 0.045f, 0.040f), metal * 1.5f);          // trigger guard
+        // the magazine: it drops out, the hand fetches a new one, and it slides back in during a reload
+        float rp = pose.reload, magDrop = 0.0f;
+        bool magVisible = true;
+        if (rp >= 0.0f) {
+            if (rp >= 0.20f && rp < 0.45f) magDrop = -(rp - 0.20f) * 3.2f;           // falls away
+            else if (rp >= 0.45f && rp < 0.62f) magVisible = false;                 // new one is being fetched
+            else if (rp >= 0.62f && rp < 0.80f) magDrop = -(0.80f - rp) * 1.8f;      // slides up into the grip
+        }
+        if (magVisible) drawPart(shader, f, glm::vec3(0.0f, -0.525f, -0.105f + magDrop), glm::vec3(0.030f, 0.045f, 0.060f), metal * 1.3f);
         shader.setFloat("uShininess", 16.0f);
         shader.setFloat("uSpecular", 0.05f);
         if (pose.flash > 0.0f) {                                                                    // muzzle flash: a small glowing star

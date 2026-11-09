@@ -10,6 +10,14 @@
 #include "world/Collision.h"
 #include "game/Weapon.h"
 
+// Things that happened during the last update(): the audio system turns these into sounds.
+struct PlayerEvents {
+    bool step = false;           // a foot touched the ground
+    bool run = false;            // ... while sprinting
+    bool jumped = false;
+    bool landed = false;         // touched the ground after a real fall / jump
+};
+
 struct PlayerInput {
     float forward = 0.0f;    // +1 = W, -1 = S
     float right   = 0.0f;    // +1 = D, -1 = A
@@ -58,6 +66,8 @@ public:
     void takeDamage(float amount);                    // never goes below 0; at 0 the player dies
     void revive();                                    // full health, standing up again (used by restart)
 
+    PlayerEvents takeEvents() { PlayerEvents e = m_events; m_events = PlayerEvents(); return e; }   // read-and-clear
+
     const glm::vec3& position() const { return m_body.pos; }
     bool grounded() const { return m_body.grounded; }
     float speed() const { return glm::length(glm::vec2(m_body.vel.x, m_body.vel.z)); }
@@ -75,6 +85,8 @@ private:
     glm::vec3 m_spawn{0.0f};
     float m_spawnFacing = 0.0f;
 
+    PlayerEvents m_events;
+    long m_lastHalfCycle = 0;
     float m_health = 100.0f;
     bool m_dead = false;
     float m_deadT = 0.0f;        // 0 standing .. 1 lying on the ground
