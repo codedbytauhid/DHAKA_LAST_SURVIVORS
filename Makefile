@@ -2,7 +2,7 @@ CXX      = g++
 CC       = gcc
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -fdiagnostics-color=always -I./include -I./src
 CFLAGS   = -O2 -I./include
-LDFLAGS  = -Llib -lglfw3 -lopengl32 -lgdi32
+LDFLAGS  = -Llib -lglfw3 -lopengl32 -lgdi32 -lwinmm
 
 OBJDIR   = build/obj
 TARGET   = build/main.exe
