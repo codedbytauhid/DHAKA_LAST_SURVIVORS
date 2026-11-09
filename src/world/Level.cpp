@@ -629,6 +629,8 @@ void Builder::buildCorridor()
     zone(Zone::Hall);
     closedDoor(false, 5.0f, 6.4f, 12.1f);
     signX(V3(11.975f, 2.5f, 5.7f), 0.25f, "EXIT", 0, 0.9f);
+    addLight(V3(11.4f, 2.3f, 5.7f), V3(0.2f, 1.0f, 0.4f) * 0.35f, 4.0f, 0);          // the green glow of the emergency exit sign
+    addLight(V3(3.75f, 2.2f, 7.0f), V3(1.0f, 0.55f, 0.25f) * 0.7f, 5.5f, 0);          // sunset light spilling in through the open exit door
 
     // doors, plates and signs
     closedDoor(true, -9.4f, -8.2f, 4.1f);
@@ -744,6 +746,9 @@ void Builder::buildStairs()
     // lights: amber lamp on the landing wall, flickering lamp in the upper hall
     int l1 = addLight(V3(-18.2f, 3.2f, 5.7f), V3(1.0f, 0.75f, 0.45f) * 0.8f, 9.0f, 1);
     box(V3(-19.0f, 2.8f, 5.4f), V3(-18.9f, 3.2f, 6.0f), fixture(l1, V3(1.0f, 0.8f, 0.5f)));
+    // a red emergency light pulsing over the landing
+    int lr = addLight(V3(-16.5f, 3.4f, 6.5f), V3(1.0f, 0.10f, 0.06f) * 0.85f, 7.5f, 3);
+    boxC(V3(-16.5f, 3.6f, 7.15f), V3(0.30f, 0.12f, 0.08f), fixture(lr, V3(1.0f, 0.15f, 0.1f), 2.0f));
     int l2 = addLight(V3(-9.0f, 6.1f, 5.7f), V3(0.7f, 0.85f, 1.0f) * 0.7f, 8.0f, 2);
     boxC(V3(-9.0f, 6.57f, 5.7f), V3(1.2f, 0.06f, 0.25f), fixture(l2, V3(0.8f, 0.9f, 1.0f)));
 }
@@ -834,6 +839,9 @@ void Builder::buildGate()
     box(V3(5.6f, 0, 33.9f), V3(6.4f, 4.0f, 34.5f), mBrick);
     box(V3(0.7f, 4.0f, 33.8f), V3(1.7f, 4.12f, 34.6f), mConcrete);
     box(V3(5.5f, 4.0f, 33.8f), V3(6.5f, 4.12f, 34.6f), mConcrete);
+    // a cold floodlight on the right pillar: lights the gate, the panel side of the booth and the walkway
+    int flood = addLight(V3(5.9f, 3.6f, 33.0f), V3(0.85f, 0.92f, 1.0f) * 0.85f, 12.0f, 0);
+    box(V3(5.7f, 3.55f, 33.62f), V3(6.3f, 3.85f, 33.9f), fixture(flood, V3(0.9f, 0.95f, 1.0f), 2.0f));
     box(V3(0.8f, 4.12f, 34.0f), V3(6.4f, 6.1f, 34.4f), mConcrete);
     for (int side = 0; side < 2; ++side) {
         float z = side == 0 ? 33.98f : 34.42f;
@@ -983,7 +991,24 @@ Level::Level() : m_cube(Mesh::createCube(1.0f))
         int id = m_collision.add(box);
         if (p.tag == 2 || p.tag == 3) m_gateCollision.push_back(id);
     }
+    // one spare light that follows the pistol's muzzle flash
+    PointLight flash;
+    flash.color = glm::vec3(1.0f, 0.8f, 0.45f);
+    flash.radius = 9.0f;
+    flash.enabled = false;
+    m_flashLight = (int)m_lights.size();
+    m_lights.push_back(flash);
+
     resetMission();
+}
+
+void Level::setMuzzleLight(const glm::vec3& position, float strength)
+{
+    if (m_flashLight < 0) return;
+    PointLight& l = m_lights[m_flashLight];
+    l.pos = position;
+    l.color = glm::vec3(1.0f, 0.8f, 0.45f) * (strength * 1.6f);
+    l.enabled = strength > 0.01f;
 }
 
 // ---------------------------------------------------------------- mission props

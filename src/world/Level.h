@@ -68,7 +68,12 @@ public:
     void setGateProgress(float t);            // 0 closed .. 1 fully open; the gate stops blocking once it is mostly open
     void setCheckpointActive(bool active);    // the glowing safe checkpoint on the road
     void setAmmoVisible(int index, bool visible);   // ammunition crate 0..3 (hidden once collected)
-    void resetMission();                      // card back on the table, gate closed, panel red, checkpoint hidden
+    void resetMission();
+
+    // Read-only access to the point lights (the audio system listens to the broken ones blinking).
+    const std::vector<PointLight>& lights() const { return m_lights; }
+    // A short orange glow where the pistol fires. strength 0 = off. (It is one extra point light, so it lights walls and zombies.)
+    void setMuzzleLight(const glm::vec3& position, float strength);                      // card back on the table, gate closed, panel red, checkpoint hidden
 
     size_t propCount() const { return m_props.size(); }
     size_t lightCount() const { return m_lights.size(); }
@@ -83,7 +88,7 @@ private:
     CollisionWorld m_collision;
     std::vector<int> m_tagProps[16];          // prop indices for every mission tag
     std::vector<int> m_gateCollision;        // collision box ids of the two gate leaves
-    int m_cardLight = -1, m_checkpointLight = -1;
+    int m_cardLight = -1, m_checkpointLight = -1, m_flashLight = -1;
     float m_gateProgress = -1.0f;
     void setTagVisible(int tag, bool visible);
     mutable const Texture* m_boundTex = nullptr;
