@@ -1,11 +1,12 @@
 // src/main.cpp
-// Milestone 6: pistol combat on top of the mission (menus, objectives, zombies).
+// Milestone 7: audio, particles, atmosphere, settings and polish on top of the finished game.
 //
 // Normal controls
 //   W A S D move | Mouse look | Shift sprint | Space jump | E interact | Wheel camera distance
-//   Right mouse AIM | Left mouse SHOOT | R reload | [ ] mouse sensitivity | Tab free the mouse | Esc pause
+//   Right mouse AIM | Left mouse SHOOT | R reload | Tab free the mouse | Esc pause
 // Debug mode (press F1 while playing): K kill nearest zombie, G god mode, U give access card, 1..6 teleport
 // (none of the debug keys do anything outside debug mode)
+// Command line:  main.exe --export-audio   writes every built-in sound as a WAV file into assets/audio/ and quits
 #include "glad.h"   // must come BEFORE glfw3.h
 #include "glfw3.h"
 
@@ -21,25 +22,32 @@
 #include "game/Weapon.h"
 #include "game/Combat.h"
 #include "game/ShotEffects.h"
+#include "game/Settings.h"
+#include "audio/AudioManager.h"
+#include "audio/GameAudio.h"
+#include "fx/ParticleSystem.h"
 #include "ui/Hud.h"
 #include "ui/GameUi.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
-static const int kZombieCount = 12;      // 1..12 (8 is lighter)
+static const int kZombieCount = 12;                 // 1..12 (8 is lighter)
+static const char* kSettingsFile = "settings.cfg";  // saved next to the game
+static const char* kAudioDir = "assets/audio";      // optional WAV files that replace built-in sounds
 
-static double g_scrollY = 0.0;           // mouse wheel movement collected by the callback
+static double g_scrollY = 0.0;                      // mouse wheel movement collected by the callback
 
 static void framebufferSizeCallback(GLFWwindow*, int w, int h) { glViewport(0, 0, w, h); }
 static void scrollCallback(GLFWwindow*, double, double y) { g_scrollY += y; }
 
-// Remembers which keys were down last frame, so we can detect "pressed THIS frame" (one event per key press).
+// Remembers which keys / buttons were down last frame, so we can detect "pressed THIS frame".
 struct Input {
     bool cur[GLFW_KEY_LAST + 1] = {};
     bool prev[GLFW_KEY_LAST + 1] = {};
-    bool mcur[3] = {}, mprev[3] = {};                 // mouse buttons: left, right, middle
+    bool mcur[3] = {}, mprev[3] = {};
     void poll(GLFWwindow* w)
     {
         for (int k = GLFW_KEY_SPACE; k <= GLFW_KEY_LAST; ++k) { prev[k] = cur[k]; cur[k] = glfwGetKey(w, k) == GLFW_PRESS; }
@@ -52,7 +60,12 @@ struct Input {
     bool confirm() const { return pressed(GLFW_KEY_ENTER) || pressed(GLFW_KEY_KP_ENTER) || pressed(GLFW_KEY_SPACE); }
     bool up() const { return pressed(GLFW_KEY_W) || pressed(GLFW_KEY_UP); }
     bool downKey() const { return pressed(GLFW_KEY_S) || pressed(GLFW_KEY_DOWN); }
+    bool leftHeld() const { return down(GLFW_KEY_A) || down(GLFW_KEY_LEFT); }
+    bool rightHeld() const { return down(GLFW_KEY_D) || down(GLFW_KEY_RIGHT); }
+    bool leftOrRightPressed() const { return pressed(GLFW_KEY_A) || pressed(GLFW_KEY_LEFT) || pressed(GLFW_KEY_D) || pressed(GLFW_KEY_RIGHT); }
 };
+
+enum class Overlay { None, Controls, Settings };      // screens drawn over the main menu or the pause menu
 
 // Where does a 3D point appear on screen? Used for the yellow objective marker.
 static MarkerInfo projectMarker(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& target,
@@ -62,7 +75,7 @@ static MarkerInfo projectMarker(const glm::mat4& view, const glm::mat4& proj, co
     glm::vec4 c = proj * view * glm::vec4(target, 1.0f);
     float nx, ny;
     bool behind = c.w <= 0.001f;
-    if (behind) {                                   // behind us: point to the screen edge in that direction
+    if (behind) {
         nx = -c.x; ny = -c.y;
         float mx = std::max(std::fabs(nx), std::fabs(ny));
         if (mx < 0.0001f) { nx = 0.0f; ny = -1.0f; mx = 1.0f; }
@@ -80,8 +93,19 @@ static MarkerInfo projectMarker(const glm::mat4& view, const glm::mat4& proj, co
     return m;
 }
 
-int main()
+static float saturate(float v) { return std::max(0.0f, std::min(1.0f, v)); }
+static glm::vec3 mixv(const glm::vec3& a, const glm::vec3& b, float t) { return a + (b - a) * t; }
+
+int main(int argc, char** argv)
 {
+    // ---- optional tool: write the built-in sounds to disk, so you can listen to them or replace them
+    if (argc > 1 && std::strcmp(argv[1], "--export-audio") == 0) {
+        AudioManager a;
+        a.init(false, kAudioDir);
+        std::printf("Wrote %d WAV files to %s/ (the folder must already exist)\n", a.exportWavs(kAudioDir), kAudioDir);
+        return 0;
+    }
+
     if (!glfwInit()) { std::fprintf(stderr, "ERROR: glfwInit failed\n"); return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -109,7 +133,7 @@ int main()
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-    // Everything that owns OpenGL objects lives in this block so it is destroyed
+    // Everything that owns OpenGL objects (or the sound device) lives in this block so it is destroyed
     // BEFORE glfwTerminate() destroys the OpenGL context.
     {
         Shader shader("shaders/lit.vert", "shaders/lit.frag");
@@ -133,22 +157,46 @@ int main()
         MissionManager mission;
         Weapon weapon;
         ShotEffects fx;
+        ParticleSystem particles;
+        if (!particles.isValid()) std::fprintf(stderr, "Particle shader failed: particles are disabled.\n");
         float hitMarker = 0.0f;                // fades after a bullet hits a zombie
         bool hitKilled = false;
 
-        zombies.spawn(kZombieCount, level.collision());
-        zombies.onEvent = [](ZombieEvent e, const glm::vec3& at) {      // audio hooks (sound comes in Milestone 6)
-            if (e == ZombieEvent::Detect) std::printf("[Zombie] noticed you at (%.1f, %.1f)\n", at.x, at.z);
-            if (e == ZombieEvent::Death)  std::printf("[Zombie] died at (%.1f, %.1f)\n", at.x, at.z);
+        // ---- settings and sound
+        Settings settings;
+        settings.load(kSettingsFile);
+        settings.clampValues();
+        std::printf("[Audio] generating sounds... ");
+        std::fflush(stdout);
+        AudioManager audio;
+        audio.init(true, kAudioDir);
+        std::printf("done.%s\n", audio.deviceOpen() ? "" : " (no sound device: running silently)");
+        GameAudio ga(audio);
+        auto applySettings = [&]() {
+            audio.setVolumes(settings.masterVolume, settings.musicVolume, settings.sfxVolume, settings.ambienceVolume);
+            camera.sensitivity = settings.mouseSensitivity;
         };
+        applySettings();
+
+        // a wall between a sound and the listener makes it quieter and duller
+        ga.isBlocked = [&](const glm::vec3& from, const glm::vec3& to) {
+            glm::vec3 d = to - from;
+            float len = glm::length(d);
+            if (len < 0.5f) return false;
+            return level.collision().raycast(from, d / len, len) < len - 0.5f;
+        };
+
+        zombies.spawn(kZombieCount, level.collision());
+        zombies.onEvent = [&](ZombieEvent e, const glm::vec3& at) { ga.zombieEvent(e, at); };   // zombie sounds, positioned in the world
+
         std::printf("Level: %zu props, %zu point lights, %zu collision boxes.\n",
                     level.propCount(), level.lightCount(), level.collision().count());
 
-        // Sunset look
-        const glm::vec3 fogColor(0.72f, 0.50f, 0.42f);
-        const glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.30f, 0.7f));
-        const glm::vec3 sunColor(1.0f, 0.62f, 0.38f);
-        const glm::vec3 ambient(0.24f, 0.21f, 0.29f);
+        // ---- the look: sunset sky, indoor fog and how it changes
+        const glm::vec3 fogOut(0.72f, 0.50f, 0.42f), fogIn(0.16f, 0.14f, 0.15f);
+        const glm::vec3 sunLate(0.95f, 0.36f, 0.22f), sunEarly(1.0f, 0.62f, 0.38f);
+        const glm::vec3 ambEarly(0.24f, 0.21f, 0.29f), ambLate(0.19f, 0.16f, 0.27f);
+        float fogBlend = 0.0f;
 
         // Debug teleport spots (keys 1..6 in debug mode) - the first one is also where the mission starts.
         struct Spot { glm::vec3 feet; float dirX, dirZ; };
@@ -175,6 +223,8 @@ int main()
             level.resetMission();
             weapon.reset();                  // full starting ammunition (12 + 36)
             fx.clear();
+            particles.clear();
+            level.setMuzzleLight(glm::vec3(0.0f), 0.0f);
             hitMarker = 0.0f;
             godMode = false;
             teleportTo(0);
@@ -182,15 +232,20 @@ int main()
         resetWorld();
 
         bool debugMode = false;
-        int menuIndex = 0, pauseIndex = 0;
-        bool showControls = false;
-        bool tabFree = false;                 // the player pressed Tab to free the cursor
-        bool captured = false;
-        bool firstMouse = true;
+        int menuIndex = 0, pauseIndex = 0, settingsRow = 0;
+        Overlay overlay = Overlay::None;
+        bool tabFree = false, captured = false, firstMouse = true;
         double lastMouseX = 0.0, lastMouseY = 0.0;
-        double lastTime = glfwGetTime(), lastFpsTime = lastTime;
+        double lastTime = glfwGetTime(), lastFpsTime = lastTime, stateEnterTime = lastTime;
         int frames = 0;
         Input input;
+        float settingsRepeat = 0.0f;
+        std::string toast; float toastT = 0.0f;                     // "OBJECTIVE COMPLETE" banner
+        float dustAcc = 0.0f, smokeAcc[2] = { 0.0f, 0.0f };         // particle emitters' timers
+        GameState prevState = GameState::MainMenu;
+        ga.stateChanged(GameState::MainMenu, GameState::MainMenu);  // starts the menu music
+
+        const glm::vec3 smokeSource[2] = { glm::vec3(-11.5f, 2.6f, 38.1f), glm::vec3(34.0f, 14.0f, 56.0f) };   // a burning bus, a burning flat
 
         while (!glfwWindowShouldClose(window)) {
             double now = glfwGetTime();
@@ -212,20 +267,39 @@ int main()
             GameState state = mission.state();
 
             // ================= input, by state =================
-            switch (state) {
-            case GameState::MainMenu:
-                if (showControls) {
-                    if (input.pressed(GLFW_KEY_ESCAPE) || input.confirm()) showControls = false;
-                } else {
-                    if (input.up()) menuIndex = (menuIndex + 2) % 3;
-                    if (input.downKey()) menuIndex = (menuIndex + 1) % 3;
-                    if (input.confirm()) {
-                        if (menuIndex == 0) { resetWorld(); mission.startMission(); }
-                        else if (menuIndex == 1) showControls = true;
-                        else glfwSetWindowShouldClose(window, GLFW_TRUE);
+            bool overlayActive = (overlay != Overlay::None) && (state == GameState::MainMenu || state == GameState::Paused);
+            if (overlayActive) {
+                if (overlay == Overlay::Controls) {
+                    if (input.pressed(GLFW_KEY_ESCAPE) || input.confirm()) { overlay = Overlay::None; ga.uiSelect(); }
+                } else {                                                       // settings: sliders applied and saved immediately
+                    if (input.up()) { settingsRow = (settingsRow + GameUi::kSettingsRows - 1) % GameUi::kSettingsRows; ga.uiSelect(); }
+                    if (input.downKey()) { settingsRow = (settingsRow + 1) % GameUi::kSettingsRows; ga.uiSelect(); }
+                    int dir = (input.rightHeld() ? 1 : 0) - (input.leftHeld() ? 1 : 0);
+                    settingsRepeat -= dt;
+                    if (dir != 0 && (input.leftOrRightPressed() || settingsRepeat <= 0.0f)) {
+                        settingsRepeat = input.leftOrRightPressed() ? 0.35f : 0.07f;      // hold the key to keep sliding
+                        float* values[4] = { &settings.masterVolume, &settings.musicVolume, &settings.sfxVolume, &settings.ambienceVolume };
+                        if (settingsRow < 4) *values[settingsRow] += 0.05f * (float)dir;
+                        else settings.mouseSensitivity += 0.01f * (float)dir;
+                        settings.clampValues();
+                        applySettings();
+                        if (settingsRow == 2 || settingsRow == 0) ga.uiSelect();           // an audible preview
                     }
-                    if (input.pressed(GLFW_KEY_ESCAPE)) glfwSetWindowShouldClose(window, GLFW_TRUE);
+                    if (dir == 0) settingsRepeat = 0.0f;
+                    if (input.pressed(GLFW_KEY_ESCAPE) || input.confirm()) { overlay = Overlay::None; settings.save(kSettingsFile); ga.uiConfirm(); }
                 }
+            } else switch (state) {
+            case GameState::MainMenu:
+                if (input.up()) { menuIndex = (menuIndex + 3) % 4; ga.uiSelect(); }
+                if (input.downKey()) { menuIndex = (menuIndex + 1) % 4; ga.uiSelect(); }
+                if (input.confirm()) {
+                    ga.uiConfirm();
+                    if (menuIndex == 0) { resetWorld(); mission.startMission(); }
+                    else if (menuIndex == 1) overlay = Overlay::Controls;
+                    else if (menuIndex == 2) { overlay = Overlay::Settings; settingsRow = 0; }
+                    else glfwSetWindowShouldClose(window, GLFW_TRUE);
+                }
+                if (input.pressed(GLFW_KEY_ESCAPE)) glfwSetWindowShouldClose(window, GLFW_TRUE);
                 break;
 
             case GameState::Intro:
@@ -240,8 +314,8 @@ int main()
                     int rounds = mission.takeAmmoReward();           // an ammunition crate was collected
                     if (rounds > 0) weapon.addReserve(rounds);
                 }
-                if (input.pressed(GLFW_KEY_LEFT_BRACKET))  camera.sensitivity = std::max(0.02f, camera.sensitivity - 0.02f);
-                if (input.pressed(GLFW_KEY_RIGHT_BRACKET)) camera.sensitivity = std::min(0.40f, camera.sensitivity + 0.02f);
+                if (input.pressed(GLFW_KEY_LEFT_BRACKET))  { settings.mouseSensitivity -= 0.02f; settings.clampValues(); applySettings(); }
+                if (input.pressed(GLFW_KEY_RIGHT_BRACKET)) { settings.mouseSensitivity += 0.02f; settings.clampValues(); applySettings(); }
                 camera.distance -= (float)g_scrollY * 0.4f;
                 camera.distance = std::max(camera.minDistance, std::min(camera.maxDistance, camera.distance));
 
@@ -258,24 +332,36 @@ int main()
             case GameState::Paused:
                 if (input.pressed(GLFW_KEY_ESCAPE)) { mission.resume(); break; }
                 if (input.pressed(GLFW_KEY_R)) { resetWorld(); mission.restart(); break; }
-                if (input.up()) pauseIndex = (pauseIndex + 3) % 4;
-                if (input.downKey()) pauseIndex = (pauseIndex + 1) % 4;
+                if (input.up()) { pauseIndex = (pauseIndex + 5) % 6; ga.uiSelect(); }
+                if (input.downKey()) { pauseIndex = (pauseIndex + 1) % 6; ga.uiSelect(); }
                 if (input.confirm()) {
+                    ga.uiConfirm();
                     if (pauseIndex == 0) mission.resume();
-                    else if (pauseIndex == 1) { resetWorld(); mission.restart(); }
-                    else if (pauseIndex == 2) { resetWorld(); mission.goToMainMenu(); menuIndex = 0; }
+                    else if (pauseIndex == 1) overlay = Overlay::Controls;                 // controls are reachable from the pause menu too
+                    else if (pauseIndex == 2) { overlay = Overlay::Settings; settingsRow = 0; }
+                    else if (pauseIndex == 3) { resetWorld(); mission.restart(); }
+                    else if (pauseIndex == 4) { resetWorld(); mission.goToMainMenu(); menuIndex = 0; }
                     else glfwSetWindowShouldClose(window, GLFW_TRUE);
                 }
                 break;
 
             case GameState::MissionFailed:
             case GameState::MissionCompleted:
-                if (input.pressed(GLFW_KEY_R)) { resetWorld(); mission.restart(); }                 // fresh start: health, zombies, card, gate
+                if (input.pressed(GLFW_KEY_R)) { resetWorld(); mission.restart(); }
                 else if (input.pressed(GLFW_KEY_M)) { resetWorld(); mission.goToMainMenu(); menuIndex = 0; }
                 break;
             }
             g_scrollY = 0.0;
             state = mission.state();                   // may have changed above
+
+            // a new screen: tell the audio (music, ambience, pause) and remember when it started (for fade-ins)
+            if (state != prevState) {
+                ga.stateChanged(prevState, state);
+                stateEnterTime = now;
+                if (state != GameState::MainMenu && state != GameState::Paused) overlay = Overlay::None;
+                if (state == GameState::Playing && prevState != GameState::Paused) toastT = 0.0f;
+                prevState = state;
+            }
 
             // mouse capture follows the state (only while playing do we hide the cursor)
             bool wantCapture = (state == GameState::Playing && !tabFree);
@@ -308,7 +394,7 @@ int main()
             bool aimHeld = canAct && input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT);
             if (state == GameState::Playing) {
                 weapon.update(dt, aimHeld);
-                if (canAct && input.pressed(GLFW_KEY_R)) weapon.startReload();
+                if (canAct && input.pressed(GLFW_KEY_R) && weapon.startReload()) ga.pistolReload();
                 hitMarker = std::max(0.0f, hitMarker - dt * 4.0f);
                 in.aiming = aimHeld;
                 in.faceCamera = aimHeld || weapon.timeSinceShot() < 0.6f;
@@ -318,7 +404,6 @@ int main()
 
             switch (state) {
             case GameState::MainMenu: {
-                // a slow camera pan over the courtyard behind the menu; zombies mill about but have nobody to chase
                 camera.position = glm::vec3(3.6f + 2.0f * (float)std::sin(now * 0.12), 2.4f, 13.0f);
                 camera.yaw = 90.0f + 28.0f * (float)std::sin(now * 0.09);
                 camera.pitch = -6.0f;
@@ -326,13 +411,27 @@ int main()
                 break;
             }
             case GameState::Intro:
-                mission.update(mf);                                  // runs the intro clock; ends by itself after 16 s
+                mission.update(mf);
                 break;
             case GameState::Playing: {
                 player.update(dt, in, camF, camR, level.collision());
+
+                // footsteps, jumps and landings
+                PlayerEvents pe = player.takeEvents();
+                float sunHere, ambHere;
+                level.lightingAt(player.position() + glm::vec3(0.0f, 0.9f, 0.0f), sunHere, ambHere);
+                bool indoorsNow = sunHere < 0.9f;
+                if (pe.step) ga.footstep(pe.run, indoorsNow);
+                if (pe.jumped) ga.jump();
+                if (pe.landed) ga.land();
+
                 float damage = zombies.update(dt, player.position(), player.speed(), !player.dead(), level.collision());
-                if (damage > 0.0f && !godMode) player.takeDamage(damage);
-                camera.aimBlend = weapon.aimBlend();                 // aiming zooms the camera in
+                if (damage > 0.0f && !godMode && !player.dead()) {
+                    player.takeDamage(damage);
+                    if (player.dead()) ga.playerDeath(); else ga.playerHurt();
+                }
+
+                camera.aimBlend = weapon.aimBlend();
                 camera.update(player.position(), dt, level.collision());
 
                 // ---- SHOOTING (left mouse button, one shot per click). See Combat.cpp for how the hit is found.
@@ -341,46 +440,67 @@ int main()
                     if (r == Weapon::Fire::Fired) {
                         glm::vec3 front = camera.front();
                         glm::vec3 chest = player.chestPosition();
-                        // start the aim ray level with the player, so zombies standing BEHIND the player cannot be hit
                         float along = std::max(0.0f, glm::dot(chest - camera.position, front));
                         glm::vec3 camOrigin = camera.position + front * along;
                         ShotResult shot = resolveShot(camOrigin, front, chest, weapon.cfg.range, weapon.cfg.damage,
                                                       weapon.cfg.headshotMultiplier, level.collision(), zombies.zombies());
-                        fx.addShot(player.muzzlePosition(), shot.impact, shot.hitZombie);
-                        zombies.alertNoise(player.position(), 10.0f);        // the shot is loud: nearby zombies come
+                        glm::vec3 muzzle = player.muzzlePosition();
+                        fx.addShot(muzzle, shot.impact, shot.hitZombie);
+                        zombies.alertNoise(player.position(), 10.0f);
+                        ga.pistolShot();
+                        particles.pool().muzzleFlash(muzzle, shot.dir);
+                        particles.pool().muzzleSmoke(muzzle);
                         if (shot.hitZombie) {
                             hitMarker = 1.0f;
                             hitKilled = shot.killed;
-                            if (shot.killed) zombies.announceDeath(shot.impact);
+                            particles.pool().blood(shot.impact, shot.dir, shot.killed);
+                            if (shot.killed) zombies.announceDeath(shot.impact); else zombies.announceHit(shot.impact);
+                        } else if (shot.hitWorld) {
+                            particles.pool().wallImpact(shot.impact, shot.dir);
+                            ga.bulletImpact(shot.impact);
                         }
                     } else if (r == Weapon::Fire::MagazineEmpty) {
+                        ga.pistolEmpty();
                         mission.pushMessage("MAGAZINE EMPTY. PRESS R TO RELOAD.", 1.6f);
                     } else if (r == Weapon::Fire::OutOfAmmo) {
+                        ga.pistolEmpty();
                         mission.pushMessage("OUT OF AMMUNITION. FIND MORE.", 1.8f);
                     }
                 }
                 fx.update(dt);
+                level.setMuzzleLight(player.muzzlePosition(), weapon.muzzleFlash());       // the flash lights up the surroundings
+
                 mf.playerPos = player.position();
                 mf.playerAlive = !player.dead();
                 mf.zombiesAlive = zombies.alive();
                 mf.playerHealth = player.health();
-                mission.update(mf);                                  // objectives, fail, complete
+                mission.update(mf);
                 break;
             }
-            case GameState::MissionFailed:                           // the dead player lies still; zombies have nobody left to attack
+            case GameState::MissionFailed:
                 camera.aimBlend = 0.0f;
                 player.update(dt, in, camF, camR, level.collision());
                 zombies.update(dt, player.position(), 0.0f, false, level.collision());
                 camera.update(player.position(), dt, level.collision());
+                level.setMuzzleLight(glm::vec3(0.0f), 0.0f);
                 break;
-            case GameState::MissionCompleted:                        // zombies are frozen, the player cannot move
+            case GameState::MissionCompleted:
                 camera.aimBlend = 0.0f;
                 player.update(dt, in, camF, camR, level.collision());
                 camera.update(player.position(), dt, level.collision());
+                level.setMuzzleLight(glm::vec3(0.0f), 0.0f);
                 break;
             case GameState::Paused:
                 break;
             }
+
+            // mission events -> sounds and the "OBJECTIVE COMPLETE" banner
+            MissionEvent me;
+            while (mission.pollEvent(me)) {
+                ga.missionEvent(me);
+                if (me == MissionEvent::ObjectiveComplete) { toast = "OBJECTIVE COMPLETE"; toastT = 2.6f; }
+            }
+            toastT = std::max(0.0f, toastT - dt);
 
             // mission props follow the mission data (cheap when nothing changed)
             level.setCardVisible(!mission.hasCard());
@@ -390,11 +510,57 @@ int main()
             for (int i = 0; i < MissionManager::kAmmoSites; ++i) level.setAmmoVisible(i, !mission.ammoTaken(i));
 
             state = mission.state();
-            if (player.hurtFlash() > 0.0f && state == GameState::Playing) {          // camera shake when hit
+            if (player.hurtFlash() > 0.0f && state == GameState::Playing) {
                 float s = player.hurtFlash() * player.hurtFlash() * 0.07f;
                 camera.position += camera.right() * (float)std::sin(now * 70.0) * s +
                                    glm::vec3(0.0f, 1.0f, 0.0f) * (float)std::cos(now * 61.0) * s;
             }
+
+            // ================= sound: listener, ambience, flickering lights =================
+            {
+                glm::vec3 listener = (state == GameState::MainMenu || state == GameState::Intro) ? camera.position
+                                                                                                  : player.position() + glm::vec3(0.0f, 1.6f, 0.0f);
+                float sunL, ambL;
+                level.lightingAt(listener, sunL, ambL);
+                static std::vector<FlickerProbe> probes;
+                probes.clear();
+                for (const PointLight& l : level.lights())
+                    if (l.flicker == 2) probes.push_back({ l.pos, l.intensity });
+                ga.update(dt, state, listener, camera.right(), sunL < 0.9f, mission.introTime(), probes);
+            }
+
+            // ================= particles: effects, dust, smoke =================
+            if (state != GameState::Paused && state != GameState::Intro) {
+                particles.update(dt);
+                glm::vec3 cp = camera.position;
+                float sunC, ambC;
+                level.lightingAt(cp, sunC, ambC);
+                bool indoorCam = sunC < 0.9f;
+                dustAcc += dt * (indoorCam ? 5.0f : 3.0f);
+                while (dustAcc >= 1.0f) {                                   // floating dust specks around the camera
+                    dustAcc -= 1.0f;
+                    ParticlePool& pp = particles.pool();
+                    float r = indoorCam ? 6.0f : 14.0f;
+                    particles.pool().dustMote(cp + glm::vec3(pp.randRange(-r, r), pp.randRange(-1.2f, 1.6f), pp.randRange(-r, r)), indoorCam);
+                }
+                for (int i = 0; i < 2; ++i) {                               // two smoke columns beyond the walls
+                    smokeAcc[i] += dt * 5.0f;
+                    while (smokeAcc[i] >= 1.0f) { smokeAcc[i] -= 1.0f; particles.pool().smokePuff(smokeSource[i], 0.45f); }
+                }
+            }
+
+            // ================= atmosphere =================
+            float progress = (state == GameState::Playing || state == GameState::Paused) ? saturate(mission.playTime() / 600.0f) : 0.0f;   // the sun slowly sets
+            glm::vec3 sunColor = mixv(sunEarly, sunLate, progress);
+            glm::vec3 sunDir = glm::normalize(glm::vec3(0.5f, 0.30f - 0.14f * progress, 0.7f));
+            glm::vec3 ambient = mixv(ambEarly, ambLate, progress);
+            {
+                float sunC, ambC;
+                level.lightingAt(camera.position, sunC, ambC);
+                fogBlend += ((sunC < 0.9f ? 1.0f : 0.0f) - fogBlend) * (1.0f - std::exp(-dt * 2.0f));   // indoors the air is darker and thicker
+            }
+            glm::vec3 fogColor = mixv(fogOut, fogIn, fogBlend);
+            float fogDensity = 0.020f + 0.012f * fogBlend;
 
             // ================= render =================
             int fbw = 0, fbh = 0;
@@ -408,7 +574,7 @@ int main()
             float fov = 60.0f - 16.0f * camera.aimBlend;                       // zoom in a little while aiming
             glm::mat4 projection = glm::perspective(glm::radians(fov), (float)fbw / (float)fbh, 0.1f, 200.0f);
 
-            if (state != GameState::Intro) {                // the intro is a black screen with text
+            if (state != GameState::Intro) {
                 shader.use();
                 shader.setMat4("uView", view);
                 shader.setMat4("uProjection", projection);
@@ -418,7 +584,7 @@ int main()
                 shader.setVec3("uSunColor", sunColor);
                 shader.setVec3("uAmbient", ambient);
                 shader.setVec3("uFogColor", fogColor);
-                shader.setFloat("uFogDensity", 0.020f);
+                shader.setFloat("uFogDensity", fogDensity);
 
                 level.drawOpaque(shader, camera.position, (float)now);
                 if (state != GameState::MainMenu) {
@@ -427,15 +593,25 @@ int main()
                     player.draw(shader, sunScale, ambScale, weapon.pose());
                 }
                 zombies.draw(shader, level, camera.position);
-                fx.draw(shader);                                          // tracers and hit sparks
+                fx.draw(shader);
                 level.drawGlass(shader, camera.position);
+
+                if (particles.isValid()) {
+                    float sunC, ambC;
+                    level.lightingAt(camera.position, sunC, ambC);
+                    particles.draw(view, projection, camera.position, std::max(0.35f, sunC));
+                }
             }
 
             // ---- 2D screens on top
             hud.begin(fbw, fbh);
-            switch (state) {
+            float stateTime = (float)(now - stateEnterTime);
+            bool menuOverlay = (state == GameState::MainMenu || state == GameState::Paused) && overlay != Overlay::None;
+            if (menuOverlay) {
+                if (overlay == Overlay::Controls) ui.controls(); else ui.settings(settingsRow, settings);
+            } else switch (state) {
             case GameState::MainMenu:
-                if (showControls) ui.controls(); else ui.mainMenu(menuIndex);
+                ui.mainMenu(menuIndex, (float)now);
                 break;
             case GameState::Intro:
                 ui.intro(mission);
@@ -450,6 +626,7 @@ int main()
                 info.godMode = godMode;
                 info.time = now;
                 info.ammoMagazine = weapon.magazine();
+                info.ammoCapacity = weapon.cfg.magazineSize;
                 info.ammoReserve = weapon.reserve();
                 info.reloading = weapon.reloading();
                 info.reloadProgress = weapon.reloadProgress();
@@ -458,6 +635,8 @@ int main()
                 info.hitMarker = hitMarker;
                 info.hitKilled = hitKilled;
                 info.alive = !player.dead();
+                info.toast = toast;
+                info.toastAlpha = (toastT > 0.0f) ? saturate(std::min((2.6f - toastT) / 0.3f, toastT / 0.5f)) : 0.0f;
                 info.marker = projectMarker(view, projection, mission.markerTarget(), player.position(), fbw, fbh);
                 ui.playing(mission, info);
                 break;
@@ -466,10 +645,10 @@ int main()
                 ui.paused(pauseIndex);
                 break;
             case GameState::MissionFailed:
-                ui.failed();
+                ui.failed(stateTime);
                 break;
             case GameState::MissionCompleted:
-                ui.completed(mission);
+                ui.completed(mission, stateTime);
                 break;
             }
             hud.end();
@@ -482,14 +661,17 @@ int main()
                 static const char* names[] = { "MENU", "INTRO", "PLAYING", "PAUSED", "FAILED", "COMPLETED" };
                 char title[256];
                 std::snprintf(title, sizeof(title),
-                              "DHAKA: THE LAST SURVIVORS | %s | FPS %d | HP %d | zombies %d/%d | stage %d/6%s%s",
+                              "DHAKA: THE LAST SURVIVORS | %s | FPS %d | HP %d | zombies %d/%d | stage %d/6 | particles %zu | voices %d%s%s",
                               names[(int)state], frames, (int)std::ceil(player.health()), zombies.alive(), zombies.total(),
-                              mission.objectivesDone(), debugMode ? " | DEBUG" : "", godMode ? " GOD" : "");
+                              mission.objectivesDone(), particles.pool().count(), audio.activeVoices(),
+                              debugMode ? " | DEBUG" : "", godMode ? " GOD" : "");
                 glfwSetWindowTitle(window, title);
                 frames = 0;
                 lastFpsTime = now;
             }
         }
+
+        settings.save(kSettingsFile);               // remember the volumes and sensitivity for next time
     }
 
     glfwTerminate();
