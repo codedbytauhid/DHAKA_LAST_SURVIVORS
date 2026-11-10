@@ -3,7 +3,7 @@
 //
 // Normal controls
 //   W A S D move | Mouse look | Shift sprint | Space jump | E interact | Wheel camera distance
-//   Right mouse AIM | Left mouse SHOOT | R reload | Tab free the mouse | Esc pause
+//   Right mouse AIM | Left mouse SHOOT | Auto reload | Tab free the mouse | Esc pause
 // Debug mode (press F1 while playing): K kill nearest zombie, G god mode, U give access card, 1..6 teleport
 // (none of the debug keys do anything outside debug mode)
 // Command line:  main.exe --export-audio   writes every built-in sound as a WAV file into assets/audio/ and quits
