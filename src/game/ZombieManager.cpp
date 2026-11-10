@@ -15,7 +15,7 @@ struct Spawn { float x, y, z, radius; bool runner; const char* where; };
 
 // Where the zombies start. y = height of the floor there (0 ground floor, 1.6 landing, 3.4 upper hall).
 // Order matters: spawn(8) uses the first eight, which are spread over the whole map.
-const Spawn kSpawns[12] = {
+const Spawn kSpawns[] = {
     { -4.3f, 0.0f,  3.2f, 1.8f, false, "classroom, back corner" },
     { 10.8f, 0.0f,  5.6f, 2.5f, false, "corridor, near the east exit" },
     { -5.5f, 0.0f, 14.5f, 3.0f, false, "courtyard, near the flag" },
@@ -28,8 +28,17 @@ const Spawn kSpawns[12] = {
     { -3.0f, 0.0f, 26.0f, 3.0f, false, "courtyard, near the abandoned car" },
     { -1.0f, 0.0f,  6.0f, 3.0f, false, "corridor, middle" },
     { -8.2f, 3.4f,  6.3f, 1.0f, false, "upper hall, near the barricade" },
+        { -8.5f, 0.0f, 19.5f, 2.5f, false, "courtyard, west lawn" },
+    {  0.5f, 0.0f, 22.0f, 3.0f, false, "courtyard, centre" },
+    {  9.0f, 0.0f, 26.5f, 2.5f, false, "courtyard, east, by the wall" },
+    { -8.0f, 0.0f, 29.5f, 2.5f, false, "courtyard, south-west corner" },
+    {  1.5f, 0.0f, 30.0f, 2.0f, false, "courtyard, near the gate" },
+    { -6.5f, 0.0f, 23.0f, 2.0f, false, "courtyard, west of centre" },
+    {  4.5f, 0.0f, 25.0f, 2.5f, false, "courtyard, south walkway" },
+    { -9.0f, 0.0f, 26.0f, 1.5f, true,  "courtyard, west side (runner)" },
 };
 
+const int kMaxSpawns = (int)(sizeof(kSpawns) / sizeof(kSpawns[0]));   // 20 now
 // look variations (indexed by zombie id)
 const vec3 kShirts[6] = { {0.20f,0.14f,0.11f}, {0.16f,0.19f,0.26f}, {0.32f,0.12f,0.10f},
                           {0.20f,0.27f,0.18f}, {0.33f,0.32f,0.28f}, {0.12f,0.12f,0.14f} };
