@@ -462,9 +462,9 @@ if (!player.dead() && weapon.magazine() == 0 && weapon.startReload()) ga.pistolR
                             ga.bulletImpact(shot.impact);
                         }
                     } else if (r == Weapon::Fire::MagazineEmpty) {
-                        ga.pistolEmpty();
-                        mission.pushMessage("MAGAZINE EMPTY. PRESS R TO RELOAD.", 1.6f);
-                    } else if (r == Weapon::Fire::OutOfAmmo) {
+    ga.pistolEmpty();
+    if (weapon.startReload()) ga.pistolReload();   // safety net; normally auto-reload has already started
+} else if (r == Weapon::Fire::OutOfAmmo) {
                         ga.pistolEmpty();
                         mission.pushMessage("OUT OF AMMUNITION. FIND MORE.", 1.8f);
                     }
