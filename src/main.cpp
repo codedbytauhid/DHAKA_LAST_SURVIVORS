@@ -34,7 +34,7 @@
 #include <cstdio>
 #include <cstring>
 
-static const int kZombieCount = 12;                 // 1..12 (8 is lighter)
+static const int kZombieCount = 20;                 // 1..12 (8 is lighter)
 static const char* kSettingsFile = "settings.cfg";  // saved next to the game
 static const char* kAudioDir = "assets/audio";      // optional WAV files that replace built-in sounds
 
@@ -394,7 +394,9 @@ int main(int argc, char** argv)
             bool aimHeld = canAct && input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT);
             if (state == GameState::Playing) {
                 weapon.update(dt, aimHeld);
-                if (canAct && input.pressed(GLFW_KEY_R) && weapon.startReload()) ga.pistolReload();
+               // AUTO-RELOAD: as soon as the magazine is empty and there is reserve ammo, reload (same reload time as before).
+// startReload() already refuses if we are reloading, the magazine is full, or the reserve is empty.
+if (!player.dead() && weapon.magazine() == 0 && weapon.startReload()) ga.pistolReload();
                 hitMarker = std::max(0.0f, hitMarker - dt * 4.0f);
                 in.aiming = aimHeld;
                 in.faceCamera = aimHeld || weapon.timeSinceShot() < 0.6f;

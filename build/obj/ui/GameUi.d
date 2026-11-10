@@ -129,7 +129,7 @@ build/obj/ui/GameUi.o: src/ui/GameUi.cpp src/ui/GameUi.h src/ui/Hud.h \
  include/glm/detail/type_half.hpp include/glm/detail/type_half.inl \
  include/glm/integer.hpp include/glm/detail/func_integer.inl \
  src/render/Mesh.h src/render/Shader.h src/render/Texture.h \
- src/game/Mission.h src/world/Collision.h
+ src/game/Mission.h src/world/Collision.h src/game/Settings.h
 src/ui/GameUi.h:
 src/ui/Hud.h:
 include/glm/glm.hpp:
@@ -278,3 +278,4 @@ src/render/Shader.h:
 src/render/Texture.h:
 src/game/Mission.h:
 src/world/Collision.h:
+src/game/Settings.h:

@@ -145,7 +145,9 @@ build/obj/main.o: src/main.cpp include/glad.h include/KHR/khrplatform.h \
  src/render/Mesh.h src/render/Texture.h src/game/Player.h \
  src/game/Weapon.h src/game/ZombieManager.h src/game/NavGraph.h \
  src/game/Zombie.h src/game/Mission.h src/game/Combat.h \
- src/game/ShotEffects.h src/ui/Hud.h src/ui/GameUi.h
+ src/game/ShotEffects.h src/game/Settings.h src/audio/AudioManager.h \
+ src/audio/Sounds.h src/audio/GameAudio.h src/fx/ParticleSystem.h \
+ src/fx/ParticlePool.h src/ui/Hud.h src/ui/GameUi.h
 include/glad.h:
 include/KHR/khrplatform.h:
 include/glfw3.h:
@@ -317,5 +319,11 @@ src/game/Zombie.h:
 src/game/Mission.h:
 src/game/Combat.h:
 src/game/ShotEffects.h:
+src/game/Settings.h:
+src/audio/AudioManager.h:
+src/audio/Sounds.h:
+src/audio/GameAudio.h:
+src/fx/ParticleSystem.h:
+src/fx/ParticlePool.h:
 src/ui/Hud.h:
 src/ui/GameUi.h:
