@@ -28,12 +28,12 @@ const Spawn kSpawns[] = {
     { -3.0f, 0.0f, 26.0f, 3.0f, false, "courtyard, near the abandoned car" },
     { -1.0f, 0.0f,  6.0f, 3.0f, false, "corridor, middle" },
     { -8.2f, 3.4f,  6.3f, 1.0f, false, "upper hall, near the barricade" },
-        { -8.5f, 0.0f, 19.5f, 2.5f, false, "courtyard, west lawn" },
+           { -8.5f, 0.0f, 19.5f, 2.5f, false, "courtyard, west lawn" },
     {  0.5f, 0.0f, 22.0f, 3.0f, false, "courtyard, centre" },
     {  9.0f, 0.0f, 26.5f, 2.5f, false, "courtyard, east, by the wall" },
     { -8.0f, 0.0f, 29.5f, 2.5f, false, "courtyard, south-west corner" },
     {  1.5f, 0.0f, 30.0f, 2.0f, false, "courtyard, near the gate" },
-    { -6.5f, 0.0f, 23.0f, 2.0f, false, "courtyard, west of centre" },
+    { 13.0f, 0.0f, 21.0f, 2.5f, false, "courtyard, east lawn, far side" },
     {  4.5f, 0.0f, 25.0f, 2.5f, false, "courtyard, south walkway" },
     { -9.0f, 0.0f, 26.0f, 1.5f, true,  "courtyard, west side (runner)" },
 };
@@ -63,7 +63,7 @@ ZombieManager::ZombieManager()
 void ZombieManager::spawn(int count, const CollisionWorld& world)
 {
     m_zombies.clear();
-    count = std::max(0, std::min(count, 12));
+   count = std::max(0, std::min(count, kMaxSpawns));
     for (int i = 0; i < count; ++i) {
         const Spawn& s = kSpawns[i];
         // sanity check against the real level: is there floor, and is the spot free of walls/furniture?
